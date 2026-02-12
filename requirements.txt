@@ -1,0 +1,8 @@
+matplotlib==3.9.4
+nflows==0.14
+numpy==2.0.2
+pyro-ppl==1.9.1
+seaborn==0.13.2
+tensorboard==2.20.0
+torch==2.8.0
+tqdm==4.67.3
