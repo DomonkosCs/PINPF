@@ -1,0 +1,28 @@
+{
+  "data_path": "data/nonlinear_15d/dataset.pt",
+  "model_path": "checkpoints/nonlinear_15d/model_epoch_best.pth",
+  "train_config": "checkpoints/nonlinear_15d/train_config.json",
+  "mode": "test",
+  "layers": 8,
+  "hidden_dim": 128,
+  "features": "grad_log_p,log_h,grad_log_h",
+  "d_lambda": 0.5,
+  "n_particles": 2000,
+  "gt_path": "data/nonlinear_15d/gt_test.pt",
+  "gt_samples": 10000,
+  "seed": 42,
+  "n_tasks": 100,
+  "baselines": {
+    "svgd": {
+      "n_particles": 500,
+      "n_iter": 50,
+      "lr": 0.2
+    },
+    "annealed_mcmc": {
+      "n_particles": 1000,
+      "n_steps": 10,
+      "n_mcmc_per_step": 2,
+      "step_size": 0.1
+    }
+  }
+}

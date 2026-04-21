@@ -1,5 +1,42 @@
 import torch
 
+# Valid optional features that can be included in the NN input beyond [x, lam, z].
+VALID_OPTIONAL_FEATURES = frozenset({"grad_log_p", "log_h", "grad_log_h", "grad_log_g"})
+# Default: original feature set (backward-compatible).
+DEFAULT_FEATURES = frozenset({"grad_log_p", "log_h", "grad_log_h"})
+
+
+def parse_features(features_str: str) -> frozenset:
+    """Parse a comma-separated feature string into a frozenset."""
+    if not features_str or features_str.strip().lower() == "none":
+        return frozenset()
+    names = frozenset(s.strip() for s in features_str.split(",") if s.strip())
+    unknown = names - VALID_OPTIONAL_FEATURES
+    if unknown:
+        raise ValueError(
+            f"Unknown optional features: {unknown}. "
+            f"Valid options: {sorted(VALID_OPTIONAL_FEATURES)}"
+        )
+    return names
+
+
+def compute_input_dim(state_dim: int, meas_dim: int, extra_features: frozenset) -> int:
+    """Compute NN input dimension for a given feature set.
+
+    Base: state_dim (x) + 1 (lam) + meas_dim (z).
+    Optional: grad_log_p (+state_dim), log_h (+1), grad_log_h (+state_dim), grad_log_g (+state_dim).
+    """
+    dim = state_dim + 1 + meas_dim
+    if "grad_log_p" in extra_features:
+        dim += state_dim
+    if "log_h" in extra_features:
+        dim += 1
+    if "grad_log_h" in extra_features:
+        dim += state_dim
+    if "grad_log_g" in extra_features:
+        dim += state_dim
+    return dim
+
 
 def divergence_batched(y, x):
     """
@@ -20,6 +57,24 @@ def divergence_batched(y, x):
     return div
 
 
+def divergence_hutchinson(y, x, e=None):
+    """
+    Hutchinson trace estimator for divergence of y w.r.t. x.
+    Uses a single Rademacher noise probe (FFJORD pattern).
+    y.shape = [B, N, D], x.shape = [B, N, D]
+    Returns: [B, N]
+    """
+    if e is None:
+        e = torch.randint(0, 2, y.shape, device=y.device, dtype=y.dtype) * 2 - 1
+    e_dydx = torch.autograd.grad(
+        outputs=y,
+        inputs=x,
+        grad_outputs=e,
+        create_graph=True,
+    )[0]
+    return (e_dydx * e).sum(dim=-1)
+
+
 def energy_distance(x, y):
     """
     Computes the Squared Energy Distance between two sets of samples x and y.
@@ -30,7 +85,7 @@ def energy_distance(x, y):
         y: Predicted samples [Batch, N_y, Dim]
 
     Returns:
-        dist: Scalar Tensor
+        dist: Scalar Tensor (Average Squared Energy Distance over batch)
     """
     if x.dim() == 2:
         x = x.unsqueeze(0)
@@ -58,6 +113,7 @@ def energy_distance(x, y):
     # D^2 = 2 * E[||x-y||] - E[||x-x'||] - E[||y-y'||]
     sq_energy_dist = 2 * term_xy - term_xx - term_yy
 
+    # Clamp to 0 to avoid -0.0000 due to float precision errors on identical sets
     sq_energy_dist = torch.clamp(sq_energy_dist, min=0.0)
 
     return torch.mean(sq_energy_dist)
@@ -124,8 +180,16 @@ def create_features(
     sub_prior,
     sub_meas,
     z_b,
-    omit_grads: bool = False,
+    extra_features: frozenset = None,
+    grad_clip=None,
+    log_prob_floor: float = -100.0,
+    grad_clamp: float = 1e4,
 ):
+    if extra_features is None:
+        extra_features = DEFAULT_FEATURES
+
+    assert x.dtype == torch.float32, f"Expected float32 input, got {x.dtype}"
+
     if isinstance(t, torch.Tensor):
         lam = t.to(x.device)
     else:
@@ -138,12 +202,25 @@ def create_features(
         z_b = z_b.unsqueeze(1)
 
     log_h_val = sub_meas.log_prob(x, z_b)
-    log_prior = sub_prior.log_prob(x)
 
-    log_p = log_prior + lam * log_h_val
+    # Clamp log probabilities to prevent -inf from dominating
+    log_h_val_clamped = torch.clamp(log_h_val, min=log_prob_floor)
+    log_prior = sub_prior.log_prob(x)
+    log_prior_clamped = torch.clamp(log_prior, min=log_prob_floor)
+
+    log_p = log_prior_clamped + lam * log_h_val_clamped
 
     grad_log_p = torch.autograd.grad(log_p.sum(), x, create_graph=True)[0]
     grad_log_h = torch.autograd.grad(log_h_val.sum(), x, create_graph=True)[0]
+
+    # Clamp gradients to prevent extreme values from -inf log probs
+    grad_log_p = torch.clamp(grad_log_p, min=-grad_clamp, max=grad_clamp)
+    grad_log_h = torch.clamp(grad_log_h, min=-grad_clamp, max=grad_clamp)
+
+    # Compute prior gradient only if needed as NN input
+    if "grad_log_g" in extra_features:
+        grad_log_g = torch.autograd.grad(log_prior.sum(), x, create_graph=True)[0]
+        grad_log_g = torch.clamp(grad_log_g, min=-grad_clamp, max=grad_clamp)
 
     lam_feat = lam.view(1, 1, 1).expand(x.size(0), x.size(1), 1)
 
@@ -151,26 +228,16 @@ def create_features(
     z_b_flat_expanded = z_b_flat.unsqueeze(1)
     z_feat = z_b_flat_expanded.repeat(1, x.size(1), 1)
 
-    if omit_grads:
-        f_net_input = torch.cat(
-            [
-                x,
-                lam_feat,
-                z_feat,
-                log_h_val.unsqueeze(-1),
-            ],
-            dim=-1,
-        )
-    else:
-        f_net_input = torch.cat(
-            [
-                x,
-                lam_feat,
-                z_feat,
-                grad_log_p,
-                log_h_val.unsqueeze(-1),
-                grad_log_h,
-            ],
-            dim=-1,
-        )
+    # Build NN input: base [x, lam, z] + optional features
+    parts = [x, lam_feat, z_feat]
+    if "grad_log_p" in extra_features:
+        parts.append(grad_log_p)
+    if "log_h" in extra_features:
+        parts.append(log_h_val.unsqueeze(-1))
+    if "grad_log_h" in extra_features:
+        parts.append(grad_log_h)
+    if "grad_log_g" in extra_features:
+        parts.append(grad_log_g)
+    f_net_input = torch.cat(parts, dim=-1)
+
     return f_net_input, grad_log_p, log_h_val

@@ -1,0 +1,28 @@
+{
+  "data_path": "data/dataset_gmm_4d.pt",
+  "model_path": "checkpoints/gmm_4d/model_epoch_best.pth",
+  "train_config": "checkpoints/gmm_4d/train_config.json",
+  "nsf_path": "checkpoints/neural_spline_flow/flow_best.pt",
+  "mode": "test",
+  "layers": 6,
+  "hidden_dim": 64,
+  "features": "grad_log_p,log_h,grad_log_h",
+  "d_lambda": 0.5,
+  "n_particles": 1500,
+  "gt_samples": 10000,
+  "seed": 42,
+  "n_tasks": 100,
+  "baselines": {
+    "svgd": {
+      "n_particles": 500,
+      "n_iter": 500,
+      "lr": 0.2
+    },
+    "annealed_mcmc": {
+      "n_particles": 1000,
+      "n_steps": 10,
+      "n_mcmc_per_step": 5,
+      "step_size": 0.1
+    }
+  }
+}
