@@ -1,8 +1,9 @@
 # PINPF — Physics-Informed Neural Particle Flow
 
-Code for the paper **"Physics-informed neural particle flow for the Bayesian update step"**.
+This repository accompanies our paper, published in *Knowledge-Based Systems* (Elsevier):
+> [Physics-informed neural particle flow for the Bayesian update step](https://www.sciencedirect.com/science/article/pii/S0950705126009354)
 
-For theoretical background, derivations, and experimental details see the paper (TBA). This README covers installation and reproducing the main comparison tables.
+The full text is freely available under the journal's open access policy. This README covers installation and reproducing the main comparison tables.
 
 ---
 
@@ -62,3 +63,22 @@ bash scripts/train_nonlinear_15d.sh
 ```
 
 Each run saves checkpoints and a `config.json` to `results/<run_name>/`.
+
+## Citation
+
+If you find our work useful in your research, please consider citing:
+
+```bibtex
+@article{csuzdi2026physics,
+title = {Physics-informed neural particle flow for the Bayesian update step},
+journal = {Knowledge-Based Systems},
+volume = {346},
+pages = {116209},
+year = {2026},
+issn = {0950-7051},
+doi = {https://doi.org/10.1016/j.knosys.2026.116209},
+url = {https://www.sciencedirect.com/science/article/pii/S0950705126009354},
+author = {Domonkos Csuzdi and Tamás Bécsi and Olivér Törő},
+keywords = {Particle flow, Physics-informed learning, Bayesian update, Amortized inference, Log-homotopy},
+}
+```
